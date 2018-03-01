@@ -6,11 +6,11 @@
  */
 package com.chezhibao.zookeeper;
 
-import org.apache.zookeeper.WatchedEvent;
-import org.apache.zookeeper.Watcher;
-import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.*;
+import org.apache.zookeeper.data.Stat;
 
 import java.io.IOException;
+import java.util.Random;
 
 /**
  * 〈〉<br>
@@ -39,16 +39,68 @@ public class Master implements Watcher {
         }
     }
 
+    String serverId = Integer.toHexString(new Random().nextInt());
+    boolean isLeader = false;
+
+    boolean checkMaster() throws KeeperException, InterruptedException {
+        while (true){
+            try {
+                Stat stat = new Stat();
+                byte[] data = zk.getData("/master", false, stat);
+                isLeader = new String(data).equals(serverId);
+                return true;
+            } catch (KeeperException.NoNodeException e) {
+                e.printStackTrace();
+                return false;
+            } catch (KeeperException.ConnectionLossException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    void runForMaster() throws InterruptedException, KeeperException {
+        while (true){
+            try {
+                zk.create("/master", serverId.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
+                isLeader = true;
+                break;
+            } catch (KeeperException.NodeExistsException e) {
+                e.printStackTrace();
+                isLeader = false;
+                break;
+            } catch (KeeperException.ConnectionLossException e) {
+                e.printStackTrace();
+            }
+            if(checkMaster()){
+                break;
+            }
+        }
+    }
+
+    void stopZK() throws InterruptedException {
+        zk.close();
+    }
+
     @Override
     public void process(WatchedEvent event) {
         System.out.println(event);
     }
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) throws Exception {
         Master master = new Master("172.16.10.102:2181");
 
         master.startZK();
 
-        Thread.sleep(60000);
+        master.runForMaster();
+
+        if(master.isLeader){
+            System.out.println("I am the leader");
+            Thread.sleep(60000);
+        }else{
+            System.out.println("someone else is the leader");
+        }
+
+        master.stopZK();
     }
+
 }
